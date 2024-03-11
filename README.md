@@ -15,7 +15,7 @@ ChatLogViewer is a Python application built with Tkinter that allows users to vi
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/your_username/ChatLogViewer.git
+git clone https://github.com/Tivoilos/EO_LogViewer/ChatLogViewer.git
 
 cd ChatLogViewer
 
