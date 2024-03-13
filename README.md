@@ -9,6 +9,9 @@ ChatLogViewer is a Python application built with Tkinter that allows users to vi
 - Auto-refresh to update chat logs when the file is modified.
 - Display total experience gained from system messages.
 - Copy all messages from a sender to the clipboard.
+- Import old chatlogs into one single chat log
+- Graph for top 10 NPC kills
+  
 
 ## Installation
 
