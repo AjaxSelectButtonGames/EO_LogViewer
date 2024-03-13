@@ -3,12 +3,16 @@ from tkinter import ttk
 import os
 import configparser
 import pyperclip
-
+import requests
+from bs4 import BeautifulSoup
+import matplotlib.pyplot as plt
+from collections import Counter
+from datetime import datetime
 class ChatLogViewer:
     def __init__(self, root):
         self.root = root
         self.root.title("Endless-Online Log View")
-        self.root.geometry("1302x983")
+        self.root.geometry("1800x983")
 
         config = configparser.ConfigParser()
         config.read("config.ini")
@@ -18,6 +22,7 @@ class ChatLogViewer:
         self.last_modified = 0  # Initialize last_modified attribute
         self.click_count = 0  # Initialize click count
         self.total_exp = 0  # Initialize total experience
+        self.monsters_killed = Counter()  # Counter to track monsters killed
 
         self.create_widgets()
         self.load_chat_log(self.log_file_path)
@@ -31,7 +36,7 @@ class ChatLogViewer:
                 self.load_chat_log(self.log_file_path)  # Reload chat log if modified
         except FileNotFoundError:
             print("Chat log file not found.")
-        
+
         self.root.after(interval, self.start_auto_refresh)
 
     def load_chat_log(self, file_path):
@@ -39,41 +44,46 @@ class ChatLogViewer:
             with open(file_path, "r") as file:
                 self.log_data = file.readlines()
 
-                # Calculate total experience
+                # Calculate total experience and monsters killed
                 for log in self.log_data:
                     if "-s" in log and "Gained" in log and "exp" in log:
                         exp_gained = int(log.split("+")[1].split("exp")[0].strip())  # Extract the amount of experience gained
                         self.total_exp += exp_gained  # Add the experience gained to the total
+                        if "from" in log:
+                            parts = log.split("from")[1].split(",")
+                            monster = parts[0].strip()
+                            self.monsters_killed[monster] += 1  # Increment kill count for the monster
         except FileNotFoundError:
             print("Chat log file not found.")
         finally:
             self.update_widgets()
-        
+
     def create_widgets(self):
-        # Create a notebook (tabbed interface)
+    # Create a notebook (tabbed interface)
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True)
 
-        # Create tabs
+    # Create tabs
         self.all_tab = ttk.Frame(self.notebook)
         self.global_tab = ttk.Frame(self.notebook)
         self.whisper_tab = ttk.Frame(self.notebook)
         self.system_tab = ttk.Frame(self.notebook)
+        self.kills_tab = ttk.Frame(self.notebook)  # New tab for kills
 
-        # Add tabs to notebook
+    # Add tabs to notebook
         self.notebook.add(self.all_tab, text="[ALL]")
         self.notebook.add(self.global_tab, text="[GLOBAL]")
         self.notebook.add(self.whisper_tab, text="[WHISPER]")
         self.notebook.add(self.system_tab, text="[SYSTEM]")
+        self.notebook.add(self.kills_tab, text="[Kills]")  # New tab for kills
 
-        # Create label for total experience in the system tab
+    # Create label for total experience in the system tab
         self.exp_label = tk.Label(self.system_tab, text=f"Total EXP: {self.total_exp}")
         self.exp_label.pack()
 
-        # Create text boxes for each tab
+    # Create text boxes for each tab
         self.all_text = tk.Text(self.all_tab, wrap="word", state="normal", foreground="black")
         self.all_text.pack(fill="both", expand=True)
-        self.all_text.bind("<Double-Button-1>", self.show_sender_messages)  # Bind double click event
 
         self.global_text = tk.Text(self.global_tab, wrap="word", state="normal", foreground="black")
         self.global_text.pack(fill="both", expand=True)
@@ -84,32 +94,27 @@ class ChatLogViewer:
         self.system_text = tk.Text(self.system_tab, wrap="word", state="normal", foreground="black")
         self.system_text.pack(fill="both", expand=True)
 
-        # Populate text boxes with log data
-        for log in self.log_data:
-            if "-s" in log:  # Check if it's a system message
-                self.all_text.insert(tk.END, log, "system")
-                self.system_text.insert(tk.END, log, "system")  # Insert system message with yellow color
-            elif "-w" in log:  # Check if it's a whisper message
-                self.all_text.insert(tk.END, log, "whisper")
-                self.whisper_text.insert(tk.END, log, "whisper")
-            else:
-                self.all_text.insert(tk.END, log)
-                self.global_text.insert(tk.END, log)
+        self.kills_text = tk.Text(self.kills_tab, wrap="word", state="normal", foreground="black")  # Text widget for kills
+        self.kills_text.pack(fill="both", expand=True)
 
-        # Configure tag for system messages to color them yellow
-        self.all_text.tag_configure("system", foreground="blue")
-        self.system_text.tag_configure("system", foreground="blue")
+        self.import_button = tk.Button(self.root, text="Import Chat Logs", command=self.import_chat_logs)
+        self.import_button.pack()
+    # Populate text boxes with log data
+        self.update_widgets()
 
-        # Configure tag for whisper messages
-        self.all_text.tag_configure("whisper", foreground="green")
-        self.whisper_text.tag_configure("whisper", foreground="green")
-    
+
     def update_widgets(self):
         # Clear the existing text boxes
-        self.all_text.delete(1.0, tk.END)
-        self.global_text.delete(1.0, tk.END)
-        self.whisper_text.delete(1.0, tk.END)
-        self.system_text.delete(1.0, tk.END)
+        if hasattr(self, 'all_text'):
+            self.all_text.delete(1.0, tk.END)
+        if hasattr(self, 'global_text'):
+            self.global_text.delete(1.0, tk.END)
+        if hasattr(self, 'whisper_text'):
+            self.whisper_text.delete(1.0, tk.END)
+        if hasattr(self, 'system_text'):
+            self.system_text.delete(1.0, tk.END)
+        if hasattr(self, 'kills_text'):
+            self.kills_text.delete(1.0, tk.END)
 
         # Update total experience label
         self.exp_label.config(text=f"Total EXP: {self.total_exp}")
@@ -117,54 +122,87 @@ class ChatLogViewer:
         # Populate text boxes with new log data
         for log in self.log_data:
             if "-s" in log:  # Check if it's a system message
-                self.all_text.insert(tk.END, log, "system")
-                self.system_text.insert(tk.END, log, "system")
+                if hasattr(self, 'all_text'):
+                    self.all_text.insert(tk.END, log, "system")
+                if hasattr(self, 'system_text'):
+                    self.system_text.insert(tk.END, log, "system")
             elif "-w" in log:  # Check if it's a whisper message
-                self.all_text.insert(tk.END, log, "whisper")
-                self.whisper_text.insert(tk.END, log, "whisper")
+                if hasattr(self, 'all_text'):
+                    self.all_text.insert(tk.END, log, "whisper")
+                if hasattr(self, 'whisper_text'):
+                    self.whisper_text.insert(tk.END, log, "whisper")
             else:
-                self.all_text.insert(tk.END, log)
-                self.global_text.insert(tk.END, log)
+                if hasattr(self, 'all_text'):
+                    self.all_text.insert(tk.END, log)
+                if hasattr(self, 'global_text'):
+                    self.global_text.insert(tk.END, log)
 
-    def show_sender_messages(self, event):
-        # Get the line where the double-click occurred
-        line_num = int(self.all_text.index(tk.INSERT).split('.')[0])
-        line_text = self.all_text.get(f"{line_num}.0", f"{line_num}.end")
+        # Generate top 10 monsters killed list and plot
+        self.generate_top_10_monsters_killed()
 
-        # Extract sender from the line text
-        if " > " in line_text:
-            sender = line_text.split(" > ")[1].split()[0]
-        else:
-            return  # If the line text doesn't contain " > ", it's not a valid log message, so return
+    def generate_top_10_monsters_killed(self):
+        # Get top 10 monsters killed
+        top_10 = self.monsters_killed.most_common(10)
 
-        # Create a new window to show messages from the sender
-        sender_window = tk.Toplevel(self.root)
-        sender_window.title(f"Messages from {sender}")
-        sender_window.geometry("800x600")
-        sender_window.iconbitmap("icon1.ico")
-        sender_text = tk.Text(sender_window, wrap="word", state="normal", foreground="black")
-        sender_text.pack(fill="both", expand=True)
+        # Clear existing text in the kills tab
+        self.kills_text.delete(1.0, tk.END)
 
-        # Create and bind the "Copy All" button
-        copy_button = tk.Button(sender_window, text="Copy All", command=lambda: self.copy_all(sender_text))
-        copy_button.pack()
+        # Display top 10 monsters killed in the kills tab
+        self.kills_text.insert(tk.END, "Top 10 Monsters Killed:\n")
+        for monster, count in top_10:
+            self.kills_text.insert(tk.END, f"{monster}: {count}\n")
 
-        # Filter messages from the sender and display them in the new window
-        for log in self.log_data:
-            if log.split(" > ")[1].startswith(sender + " "):  # Check if the log message starts with the sender's name
-                sender_text.insert(tk.END, log)
+        # Plot top 10 monsters killed
+        if top_10:
+            plt.figure(figsize=(10, 6))
+            monsters, counts = zip(*top_10)
+            plt.barh(range(len(top_10)), counts, tick_label=monsters, color='skyblue')
+            plt.xlabel('Number of Kills')
+            plt.ylabel('Monsters')
+            plt.title('Top 10 Monsters Killed')
+            plt.gca().invert_yaxis()
+            plt.tight_layout()
+            plt.show()
 
-    def copy_all(self, text_widget):
-        """Copy all text from the provided text widget to the system clipboard."""
-        copied_text = text_widget.get(1.0, tk.END)
-        pyperclip.copy(copied_text)
+    
+    
+    def import_chat_logs(self):
+        # Open a file dialog to select chat log files for import
+        file_paths = tk.filedialog.askopenfilenames(title="Select Chat Log Files", filetypes=(("Text Files", "*.txt"), ("All Files", "*.*")))
+        
+        if file_paths:
+            imported_logs = []
 
+            # Read and append logs from each selected file
+            for file_path in file_paths:
+                try:
+                    with open(file_path, "r") as file:
+                        imported_logs.extend(file.readlines())
+                except FileNotFoundError:
+                    print(f"File not found: {file_path}")
+
+            # Combine the imported logs with the current log data
+            combined_logs = self.log_data + imported_logs
+
+            # Sort the combined logs by timestamp (oldest to newest)
+            combined_logs.sort(key=lambda x: datetime.strptime(x.split(" ")[0], "%m/%d/%Y"))
+
+            # Save the combined logs to the chat log file
+            with open(self.log_file_path, "w") as file:
+                file.writelines(combined_logs)
+
+            # Reload chat log with combined data
+            self.load_chat_log(self.log_file_path)
+
+
+
+    
 def main():
     root = tk.Tk()
-    app = ChatLogViewer(root)
+    root.iconbitmap("icon1.ico")
 
-    icon_path = "icon1.ico"  # Replace "path_to_your_icon.ico" with the path to your icon file
-    root.iconbitmap(icon_path)
+    app = ChatLogViewer(root)
+    app.import_chat_logs()
 
     root.mainloop()
 
